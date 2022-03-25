@@ -1,4 +1,5 @@
 import sys, os
+from this import d
 import numpy as np
 
 from PIL import Image
@@ -14,13 +15,17 @@ from matplotlib.ticker import MaxNLocator
 
 
 class HDR:
-  def __init__(self, path, sample_num=1000, smoothness=10):
+  def __init__(self, path, sample_num=1000, smoothness=10, dt=0):
     self.path = path
     self.sample_num = sample_num
     self.smoothness = smoothness
     # self.brightest_dt = brightest_dt
 
     image_fns = sorted(glob.glob(os.path.join(path, '*.JPG')))
+    if len(image_fns) == 0:
+      image_fns = sorted(glob.glob(os.path.join(path, '*.png')))
+    if len(image_fns) == 0:
+      image_fns = sorted(glob.glob(os.path.join(path, '*.jpg')))
     print(image_fns)
 
     self.raw_images = np.asarray([np.asarray(Image.open(fn).convert("RGB")) for fn in image_fns])
@@ -32,17 +37,23 @@ class HDR:
     self.num_pixels = self.h * self.w # number of total pixels
     self.raw_images = self.raw_images.reshape(self.P, -1, 3)
 
-    self.dt = []
-    for fn in image_fns:
-      exif = Image.open(fn)._getexif()
-      if exif is not None:
-        for (tag, value) in exif.items():
-          key = TAGS.get(tag, tag)
-          if key == 'ExposureTime':
-            self.dt.append(value)
-    assert len(self.dt) == self.P
+    if dt != 0:
+      self.dt = dt
+    else:
+      self.dt = []
+      for fn in image_fns:
+        exif = Image.open(fn)._getexif()
+        if exif is not None:
+          for (tag, value) in exif.items():
+            key = TAGS.get(tag, tag)
+            if key == 'ExposureTime':
+              self.dt.append(value)
+        else:
+          break
+    if len(self.dt) != self.P:
+      self.dt = np.exp(np.log(2) * np.arange(5, 5 - self.P, -1, dtype=np.float64))
     print("Exposure time: ", self.dt)
-    self.dt = np.array(self.dt)
+    self.dt = np.array(self.dt, dtype=np.float64)
 
 
     exif = Image.open(image_fns[0])._getexif()
@@ -106,7 +117,7 @@ class HDR:
 
     lnE = self.x[256:]
     # print(np.expand_dims(lnE, 1).repeat(P, 1).T.shape)
-    lndt = np.expand_dims(np.log(self.dt)).repeat(N, 1)
+    lndt = np.expand_dims(np.log(self.dt), axis=1).repeat(N, 1)
     # print(dt.shape)
 
     lnX = np.expand_dims(lnE, 1).repeat(self.P, 1).T + lndt
@@ -180,12 +191,12 @@ class HDR:
     # plt.imshow(Ld.reshape(self.h, self.w, 3))
 
     import matplotlib
-    matplotlib.image.imsave('tone_mapped_key1e-1.png', Ld.reshape(self.h, self.w, 3))
+    matplotlib.image.imsave('aligned_tone_mapped_key1e-1.png', Ld.reshape(self.h, self.w, 3))
     # plt.figure()
     # sns.heatmap(Lw.reshape(768, 512), square=True, cmap='Spectral', norm=LogNorm())
     # plt.figure()
     # sns.heatmap(Ld.reshape(768, 512), square=True, cmap='Spectral', norm=LogNorm())
 
 if __name__ == '__main__':
-    hdr = HDR('hdr_photos')
+    hdr = HDR('aligned', dt=[10.0, 5.0, 2.5, 1.6, 0.8, 0.5, 0.25, 0.125, 0.06666666666666667, 0.03333333333333333, 0.016666666666666666, 0.01, 0.005])
     hdr.main()

@@ -10,12 +10,13 @@ import numpy as np
 import cv2
 
 class AlignMTBImpl:
-    def __init__(self, path, exclusion_range=10):
+    def __init__(self, path, exclusion_range=1):
         self.exclusion_range = exclusion_range
 
         image_fns = sorted(glob.glob(os.path.join(path, '*.JPG')))
         self.P = len(image_fns) # number of images
 
+        self.rgb_images = np.asarray([np.asarray(Image.open(fn).convert("RGB")) for fn in image_fns])
         self.raw_images = np.asarray([np.asarray(Image.open(fn).convert("L")) for fn in image_fns])
 
         # print(self.raw_images[2])
@@ -23,11 +24,15 @@ class AlignMTBImpl:
         # img.save('greyscale.png')
 
     def process(self):
+        img = Image.fromarray(self.rgb_images[0])
+        img.save('aligned/aligned_' + "{:02d}".format(0) + '.png')
         for p in range(1, self.P):
             shift = self.calculateShift(self.raw_images[0], self.raw_images[p])
-            self.raw_images[p] = self.shiftMat(self.raw_images[p] , shift)
-            img = Image.fromarray(self.raw_images[p])
-            img.save('greyscale' + str(p) + '.png')
+            print("Image ", str(p), ":", shift)
+
+            self.rgb_images[p] = self.shiftMat(self.rgb_images[p] , shift)
+            img = Image.fromarray(self.rgb_images[p])
+            img.save('aligned/aligned_' + "{:02d}".format(p) + '.png')
         # TODO
         #     CV_INSTRUMENT_REGION();
         #     std::vector<Mat> src;
@@ -78,7 +83,7 @@ class AlignMTBImpl:
 
 
     def calculateShift(self, img0, img1):
-        maxlevel = int(np.log2(min(img0.shape[0], img0.shape[1]))) - 1
+        maxlevel = int(np.log2(min(img0.shape[0], img0.shape[1]))) - 2
         pyr0 = self.buildPyr(img0, maxlevel)
         pyr1 = self.buildPyr(img1, maxlevel)
 
@@ -93,11 +98,16 @@ class AlignMTBImpl:
                     test_shift = shift + np.array([v, h])
                     shifted_tb1 = self.shiftMat(tb1, test_shift)
                     shifted_eb1 = self.shiftMat(eb1, test_shift)
-                    diff = np.bitwise_xor(tb0, shifted_tb1, dtype=np.bool8)
-                    # diff = tb0 ^ shifted_tb1
-                    diff = np.bitwise_and(diff, eb0)
-                    diff = np.bitwise_and(diff, shifted_eb1)
+
+                    diff = np.logical_xor(tb0, shifted_tb1)
+                    # diff = np.logical_and(diff, eb0)
+                    # diff = np.logical_and(diff, shifted_eb1)
+
+                    # img = Image.fromarray(diff)
+                    # img.save('diff_'+ str(v)+ "_"+ str(h)+ '.png')
+
                     err = np.sum(diff)
+                    # print(v, " ", h, " " , err)
                     if err < min_err:
                         new_shift = test_shift
                         min_err = err
@@ -152,18 +162,39 @@ class AlignMTBImpl:
 
 
     def shiftMat(self, src, shift):
-        v_pad = np.zeros((abs(shift[0]), src.shape[1]), dtype=np.bool8)
-        h_pad = np.zeros((abs(shift[1]), src.shape[0]), dtype=np.bool8)
-        
-        if shift[0] > 0:
-            src = np.concatenate((v_pad, src[:shift[0]]), axis=0)
-        else:
-            src = np.concatenate((src[shift[0]:], v_pad), axis=0)
+        if len(src.shape) <= 2:
+            v_pad = np.zeros((abs(shift[0]), src.shape[1]), dtype=np.bool8)
+            h_pad = np.zeros((src.shape[0], abs(shift[1])), dtype=np.bool8)
+            if shift[0] > 0:
+                src = np.concatenate((v_pad, src[:-shift[0], :]), axis=0)
+            elif shift[0] < 0:
+                src = np.concatenate((src[-shift[0]:, :], v_pad), axis=0)
+            else:
+                pass
 
-        if shift[1] > 0:
-            src = np.concatenate((h_pad, src[:shift[1]]), axis=1)
+            if shift[1] > 0:
+                src = np.concatenate((h_pad, src[:, :-shift[1]]), axis=1)
+            elif shift[1] < 0:
+                src = np.concatenate((src[:, -shift[1]:], h_pad), axis=1)
+            else:
+                pass
         else:
-            src = np.concatenate((src[shift[1]:], h_pad), axis=1)
+            v_pad = np.zeros((abs(shift[0]), src.shape[1], 3), dtype=np.bool8)
+            h_pad = np.zeros((src.shape[0], abs(shift[1]), 3), dtype=np.bool8)
+        
+            if shift[0] > 0:
+                src = np.concatenate((v_pad, src[:-shift[0], :,:]), axis=0)
+            elif shift[0] < 0:
+                src = np.concatenate((src[-shift[0]:, :,:], v_pad), axis=0)
+            else:
+                pass
+
+            if shift[1] > 0:
+                src = np.concatenate((h_pad, src[:, :-shift[1],:]), axis=1)
+            elif shift[1] < 0:
+                src = np.concatenate((src[:, -shift[1]:,:], h_pad), axis=1)
+            else:
+                pass
 
         return src
         
@@ -187,8 +218,8 @@ class AlignMTBImpl:
         self.ex_bitmap = np.zeros_like(img, dtype=np.bool8)
 
         median = np.median(img, axis=None)
-        bitmap = np.where(img > median, 1, 0)
-        ex_bitmap = np.where(np.abs(img - median) < self.exclusion_range, 1, 0)
+        bitmap = np.where(img > median, True, False)
+        ex_bitmap = np.where(np.abs(img - median) > self.exclusion_range, True, False)
 
         return bitmap, ex_bitmap
         # TODO
@@ -205,7 +236,7 @@ class AlignMTBImpl:
 
 
     def downsample(self, src):
-        return cv2.resize(src, (src.shape[0]//2, src.shape[1]//2), interpolation=cv2.INTER_AREA)
+        return cv2.resize(src, (src.shape[1]//2, src.shape[0]//2), interpolation=cv2.INTER_AREA)
         # TODO
         # dst = Mat(src.rows / 2, src.cols / 2, CV_8UC1);
 

@@ -2,14 +2,32 @@
 #include "opencv2/photo.hpp"
 #include "opencv2/imgproc.hpp"
 #include "hdr_common.hpp"
-
+from distutils.command.build import build
+from PIL import Image
+import glob
+import os
+import numpy as np
+import cv2
 
 class AlignMTBImpl:
-    def __init__(self,):
-        pass
+    def __init__(self, path, exclusion_range=10):
+        self.exclusion_range = exclusion_range
 
-    def process(self, src, dst):
-        pass
+        image_fns = sorted(glob.glob(os.path.join(path, '*.JPG')))
+        self.P = len(image_fns) # number of images
+
+        self.raw_images = np.asarray([np.asarray(Image.open(fn).convert("L")) for fn in image_fns])
+
+        # print(self.raw_images[2])
+        # img = Image.fromarray(self.raw_images[2])
+        # img.save('greyscale.png')
+
+    def process(self):
+        for p in range(1, self.P):
+            shift = self.calculateShift(self.raw_images[0], self.raw_images[p])
+            self.raw_images[p] = self.shiftMat(self.raw_images[p] , shift)
+            img = Image.fromarray(self.raw_images[p])
+            img.save('greyscale' + str(p) + '.png')
         # TODO
         #     CV_INSTRUMENT_REGION();
         #     std::vector<Mat> src;
@@ -59,8 +77,33 @@ class AlignMTBImpl:
         # }
 
 
-    def calculateShift(self, src, dst):
-        pass
+    def calculateShift(self, img0, img1):
+        maxlevel = int(np.log2(min(img0.shape[0], img0.shape[1]))) - 1
+        pyr0 = self.buildPyr(img0, maxlevel)
+        pyr1 = self.buildPyr(img1, maxlevel)
+
+        shift = np.array([0,0])
+        for level in range(maxlevel, 0, -1):
+            shift = shift * 2
+            tb0, eb0 = self.computeBitmaps(pyr0[level])
+            tb1, eb1 = self.computeBitmaps(pyr1[level])
+            min_err = pyr0[level].shape[0] * pyr0[level].shape[1]
+            for v in (-1, 0, 1):
+                for h in (-1, 0, 1):
+                    test_shift = shift + np.array([v, h])
+                    shifted_tb1 = self.shiftMat(tb1, test_shift)
+                    shifted_eb1 = self.shiftMat(eb1, test_shift)
+                    diff = np.bitwise_xor(tb0, shifted_tb1, dtype=np.bool8)
+                    # diff = tb0 ^ shifted_tb1
+                    diff = np.bitwise_and(diff, eb0)
+                    diff = np.bitwise_and(diff, shifted_eb1)
+                    err = np.sum(diff)
+                    if err < min_err:
+                        new_shift = test_shift
+                        min_err = err
+            shift = new_shift
+        return shift
+
         # TODO
         # CV_INSTRUMENT_REGION();
 
@@ -108,7 +151,22 @@ class AlignMTBImpl:
         # return shift;
 
 
-    def shiftMat(self, src, dst, shift):
+    def shiftMat(self, src, shift):
+        v_pad = np.zeros((abs(shift[0]), src.shape[1]), dtype=np.bool8)
+        h_pad = np.zeros((abs(shift[1]), src.shape[0]), dtype=np.bool8)
+        
+        if shift[0] > 0:
+            src = np.concatenate((v_pad, src[:shift[0]]), axis=0)
+        else:
+            src = np.concatenate((src[shift[0]:], v_pad), axis=0)
+
+        if shift[1] > 0:
+            src = np.concatenate((h_pad, src[:shift[1]]), axis=1)
+        else:
+            src = np.concatenate((src[shift[1]:], h_pad), axis=1)
+
+        return src
+        
         # TODO
         # CV_INSTRUMENT_REGION();
 
@@ -124,8 +182,15 @@ class AlignMTBImpl:
         # src(src_rect).copyTo(res(dst_rect));
         # res.copyTo(dst);
     
-    def computeBitmaps(self, img, tb, eb)
-        pass
+    def computeBitmaps(self, img):
+        self.bitmap = np.zeros_like(img, dtype=np.bool8)
+        self.ex_bitmap = np.zeros_like(img, dtype=np.bool8)
+
+        median = np.median(img, axis=None)
+        bitmap = np.where(img > median, 1, 0)
+        ex_bitmap = np.where(np.abs(img - median) < self.exclusion_range, 1, 0)
+
+        return bitmap, ex_bitmap
         # TODO
 
         # CV_INSTRUMENT_REGION();
@@ -139,7 +204,8 @@ class AlignMTBImpl:
         # compare(abs(img - median), exclude_range, eb, CMP_GT);
 
 
-    def downsample(self, src, dst):
+    def downsample(self, src):
+        return cv2.resize(src, (src.shape[0]//2, src.shape[1]//2), interpolation=cv2.INTER_AREA)
         # TODO
         # dst = Mat(src.rows / 2, src.cols / 2, CV_8UC1);
 
@@ -159,7 +225,11 @@ class AlignMTBImpl:
 
 
 
-    def buildPyr(self, img, pyr, maxlevel)
+    def buildPyr(self, img, maxlevel):
+        pyr = [img,]
+        for l in range(maxlevel):
+            pyr.append(self.downsample(pyr[l]))
+        return pyr
         # TODO
         # pyr.resize(maxlevel + 1);
         # pyr[0] = img.clone();
@@ -168,6 +238,7 @@ class AlignMTBImpl:
         # }
 
     def getMedian(self, img):
+        pass
         # TODO
         # int channels = 0;
         # Mat hist;
@@ -190,3 +261,8 @@ class AlignMTBImpl:
 # }
 
 # }
+
+
+if __name__ == '__main__':
+    aligner = AlignMTBImpl('hdr_photos')
+    aligner.process()

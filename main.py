@@ -1,5 +1,6 @@
 import sys, os
 from this import d
+from cv2 import AlignMTB
 import numpy as np
 
 from PIL import Image
@@ -7,28 +8,36 @@ from PIL.ExifTags import TAGS
 
 import matplotlib.pyplot as plt
 import glob
+import shutil
 
 import seaborn as sns; sns.set_theme(style='white')
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, Normalize
 from matplotlib.ticker import MaxNLocator
 
+from alignMTB import AlignMTBImpl
+
 
 class HDR:
-  def __init__(self, path, sample_num=1000, smoothness=10, dt=0):
-    self.path = path
+  def __init__(self, path, aligned_path='aligned', sample_num=1000, smoothness=10, dt=0):
+    shutil.rmtree(aligned_path, ignore_errors=True)
+    try:
+      os.mkdir(aligned_path)
+    except FileExistsError:
+      print("aligned photo directory exists")
+    aligner = AlignMTBImpl(path, aligned_path)
+    aligner.process()
     self.sample_num = sample_num
     self.smoothness = smoothness
-    # self.brightest_dt = brightest_dt
 
     image_fns = sorted(glob.glob(os.path.join(path, '*.JPG')))
     if len(image_fns) == 0:
       image_fns = sorted(glob.glob(os.path.join(path, '*.png')))
     if len(image_fns) == 0:
       image_fns = sorted(glob.glob(os.path.join(path, '*.jpg')))
-    print(image_fns)
 
-    self.raw_images = np.asarray([np.asarray(Image.open(fn).convert("RGB")) for fn in image_fns])
+    aligned_image_fns = sorted(glob.glob(os.path.join(aligned_path, '*.png')))
+    self.raw_images = np.asarray([np.asarray(Image.open(fn).convert("RGB")) for fn in aligned_image_fns])
     print(self.raw_images.shape)
 
     self.P = self.raw_images.shape[0] # number of pictures
@@ -61,6 +70,7 @@ class HDR:
     
     # raise
   def main(self):
+    self.alignment()
     self.preproccess()
     self.compute_response_curve()
     self.constructHDR()
@@ -153,9 +163,10 @@ class HDR:
     lnEi = lnEi / weight_sum
     self.Ei = np.exp(lnEi)
     del self.raw_images
+    del self.images
 
   def tonemapping(self, key=0.7):
-    print("tone mapping")
+    print("Tone mapping")
     # plt.figure(figsize = (20,20))
     intensity = (54*self.Ei[:,0] + 183*self.Ei[:,1] + 19*self.Ei[:,2]) / 256
 
@@ -191,12 +202,12 @@ class HDR:
     # plt.imshow(Ld.reshape(self.h, self.w, 3))
 
     import matplotlib
-    matplotlib.image.imsave('aligned_tone_mapped_key1e-1.png', Ld.reshape(self.h, self.w, 3))
+    matplotlib.image.imsave('output.png', Ld.reshape(self.h, self.w, 3))
     # plt.figure()
     # sns.heatmap(Lw.reshape(768, 512), square=True, cmap='Spectral', norm=LogNorm())
     # plt.figure()
     # sns.heatmap(Ld.reshape(768, 512), square=True, cmap='Spectral', norm=LogNorm())
 
 if __name__ == '__main__':
-    hdr = HDR('aligned', dt=[10.0, 5.0, 2.5, 1.6, 0.8, 0.5, 0.25, 0.125, 0.06666666666666667, 0.03333333333333333, 0.016666666666666666, 0.01, 0.005])
-    hdr.main()
+  hdr = HDR('test')
+  hdr.main()

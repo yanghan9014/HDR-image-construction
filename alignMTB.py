@@ -10,10 +10,17 @@ import numpy as np
 import cv2
 
 class AlignMTBImpl:
-    def __init__(self, path, exclusion_range=1):
+    def __init__(self, path, out_path, exclusion_range=1):
+        self.out_path = out_path
         self.exclusion_range = exclusion_range
 
         image_fns = sorted(glob.glob(os.path.join(path, '*.JPG')))
+        if len(image_fns) == 0:
+            image_fns = sorted(glob.glob(os.path.join(path, '*.png')))
+        if len(image_fns) == 0:
+            image_fns = sorted(glob.glob(os.path.join(path, '*.jpg')))
+
+        print(image_fns)
         self.P = len(image_fns) # number of images
 
         self.rgb_images = np.asarray([np.asarray(Image.open(fn).convert("RGB")) for fn in image_fns])
@@ -24,15 +31,18 @@ class AlignMTBImpl:
         # img.save('greyscale.png')
 
     def process(self):
+        print("Aligning images")
         img = Image.fromarray(self.rgb_images[0])
-        img.save('aligned/aligned_' + "{:02d}".format(0) + '.png')
+        img.save(os.path.join(self.out_path, "aligned_{:02d}".format(0) + '.png'))
         for p in range(1, self.P):
             shift = self.calculateShift(self.raw_images[0], self.raw_images[p])
             print("Image ", str(p), ":", shift)
 
             self.rgb_images[p] = self.shiftMat(self.rgb_images[p] , shift)
             img = Image.fromarray(self.rgb_images[p])
-            img.save('aligned/aligned_' + "{:02d}".format(p) + '.png')
+            img.save(os.path.join(self.out_path, "aligned_{:02d}".format(p) + '.png'))
+        del self.rgb_images
+        del self.raw_images
         # TODO
         #     CV_INSTRUMENT_REGION();
         #     std::vector<Mat> src;

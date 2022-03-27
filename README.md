@@ -19,12 +19,12 @@ python3 main.py --input [input directory] --key [photographic tonemapping key]
 ## Algorithm implementations
 In this project, we implemented the following algorithms
 ### MTB image alignment
-- We slightly modified the MTB image alignment, comparing the bitmap of whether a pixel is brighter than the one on the right (or on the top)
+- We slightly modified the MTB image alignment. It matches the *gradient* of a pair of image using the pyrimid method from MTB.
 - Alignment may fail for images that are too dark
 ### HDR image construction: Debevec's Method
 - We set the g function's smoothness to 10 by default, and randomly sample 1000 points to compute the camera response function
 - Some photos are taken with different ISO speed. To accommodate the difference, we take the product of exposure time and ISO speed as the final Δt
-- The HDR radience map is composited using the average camera response function of the three colors channels
+- The HDR radience map is composited using the average camera response function of the three color channels
 ### Tone mapping: Photographic (global operation)
 - We set the key to 0.7 by default
 - Lwhite is set to the maximum luminance
